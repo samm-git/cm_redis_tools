@@ -39,12 +39,6 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
     protected $_notMatchingTags = FALSE;
 
     /** @var int */
-    protected $_persistent = 0;
-    
-    /** @var int */
-    protected $_lifetimelimit    = 2592000; /* Redis backend limit */
-    
-    /** @var int */
     protected $_compressTags = 1;
 
     /** @var int */
@@ -71,13 +65,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
             Zend_Cache::throwException('Redis \'port\' not specified.');
         }
 
-        if ( isset($options['persistent']) ) {
-            $this->_persistent = (int) $options['persistent'];
-        }
         if( isset($options['timeout'])) {
-            $this->_redis = new Credis_Client($options['server'], $options['port'], $options['timeout'], $this->_persistent);
+            $this->_redis = new Credis_Client($options['server'], $options['port'], $options['timeout']);
         } else {
-            $this->_redis = new Credis_Client($options['server'], $options['port'], 2.5, $this->_persistent);
+            $this->_redis = new Credis_Client($options['server'], $options['port']);
         }
 
         if ( isset($options['force_standalone']) && $options['force_standalone']) {
@@ -106,10 +97,6 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
             $this->_compressData = (int) $options['compress_data'];
         }
 
-        if ( isset($options['lifetimelimit'])) {
-            $this->_lifetimelimit = (int) $options['lifetimelimit'];
-        }
-        
         if ( isset($options['compress_threshold'])) {
             $this->_compressThreshold = (int) $options['compress_threshold'];
         }
@@ -201,7 +188,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
 
         // Always expire so the volatile-* eviction policies may be safely used, otherwise
         // there is a risk that tag data could be evicted.
-        $this->_redis->expire(self::PREFIX_KEY.$id, $lifetime ? $lifetime : $this->_lifetimelimit);
+        $this->_redis->expire(self::PREFIX_KEY.$id, $lifetime ? $lifetime : self::MAX_LIFETIME);
 
         // Process added tags
         if ($addTags = ($oldTags ? array_diff($tags, $oldTags) : $tags))
@@ -340,6 +327,9 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         $this->_redis->exec();
     }
 
+    /**
+     * Clean up tag id lists since as keys expire the ids remain in the tag id lists
+     */
     protected function _collectGarbage()
     {
         // Clean up expired keys from tag id set and global id set
@@ -349,47 +339,47 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         {
             // Get list of expired ids for each tag
             $tagMembers = $this->_redis->sMembers(self::PREFIX_TAG_IDS . $tag);
+            $numTagMembers = count($tagMembers);
             $expired = array();
-            if(count($tagMembers)) {
-                foreach($tagMembers as $id) {
+            $numExpired = $numNotExpired = 0;
+            if($numTagMembers) {
+                while ($id = array_pop($tagMembers)) {
                     if( ! isset($exists[$id])) {
                         $exists[$id] = $this->_redis->exists(self::PREFIX_KEY.$id);
                     }
-                    if( ! $exists[$id]) {
+                    if ($exists[$id]) {
+                        $numNotExpired++;
+                    }
+                    else {
+                        $numExpired++;
                         $expired[] = $id;
+
+                        // Remove incrementally to reduce memory usage
+                        if (count($expired) % 100 == 0 && $numNotExpired > 0) {
+                            $this->_redis->sRem( self::PREFIX_TAG_IDS . $tag, $expired);
+                            if($this->_notMatchingTags) { // Clean up expired ids from ids set
+                                $this->_redis->sRem( self::SET_IDS, $expired);
+                            }
+                            $expired = array();
+                        }
                     }
                 }
                 if( ! count($expired)) continue;
             }
 
-            $this->_redis->pipeline();
-
             // Remove empty tags or completely expired tags
-            if( ! count($tagMembers) || count($expired) == count($tagMembers)) {
+            if ($numExpired == $numTagMembers) {
                 $this->_redis->del(self::PREFIX_TAG_IDS . $tag);
                 $this->_redis->sRem(self::SET_TAGS, $tag);
             }
             // Clean up expired ids from tag ids set
-            else {
-            // Clean up expired ids from tag ids set
-        	$count = 0;
-        	foreach ($expired as $expirev){
-            	    $this->_redis->sRem( self::PREFIX_TAG_IDS . $tag, $expirev);
-            	    $count++;
-            	    if($count == 1000) { // do not remove > 1000 records at once
-            		$this->_redis->exec();
-            		$this->_redis->pipeline();
-            		$count = 0;
-            	    }
-		}
+            else if (count($expired)) {
+                $this->_redis->sRem( self::PREFIX_TAG_IDS . $tag, $expired);
+                if($this->_notMatchingTags) { // Clean up expired ids from ids set
+                    $this->_redis->sRem( self::SET_IDS, $expired);
+                }
             }
-
-            // Clean up expired ids from ids set
-            if($this->_notMatchingTags) {
-                $this->_redis->sRem( self::SET_IDS, $expired);
-            }
-
-            $this->_redis->exec();
+            unset($expired);
         }
 
         // Clean up global list of ids for ids with no tag
