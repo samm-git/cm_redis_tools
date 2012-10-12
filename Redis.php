@@ -371,7 +371,17 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
             }
             // Clean up expired ids from tag ids set
             else {
-                $this->_redis->sRem( self::PREFIX_TAG_IDS . $tag, $expired);
+            // Clean up expired ids from tag ids set
+        	$count = 0;
+        	foreach ($expired as $expirev){
+            	    $this->_redis->sRem( self::PREFIX_TAG_IDS . $tag, $expirev);
+            	    $count++;
+            	    if($count == 1000) { // do not remove > 1000 records at once
+            		$this->_redis->exec();
+            		$this->_redis->pipeline();
+            		$count = 0;
+            	    }
+		}
             }
 
             // Clean up expired ids from ids set
