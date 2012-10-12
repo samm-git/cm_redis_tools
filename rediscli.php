@@ -1,5 +1,5 @@
 <?php
-include_once("credis/Client.php");
+include_once("lib/Credis/Client.php");
 
 abstract class Zend_Cache
 {
