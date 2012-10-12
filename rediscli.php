@@ -23,6 +23,11 @@ interface Zend_Cache_Backend_ExtendedInterface
 
 include_once("Redis.php");
 
+echo "Cleaning DB 0\n";
+$cache = new Cm_Cache_Backend_Redis(array('server' => "127.0.0.1", 'port' => "6379", 'database' => 0));
+$cache->clean(Zend_Cache::CLEANING_MODE_OLD);
+
+echo "Cleaning DB 1\n";
 $cache = new Cm_Cache_Backend_Redis(array('server' => "127.0.0.1", 'port' => "6379", 'database' => 1));
 $cache->clean(Zend_Cache::CLEANING_MODE_OLD);
 
