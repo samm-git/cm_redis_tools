@@ -1,5 +1,5 @@
-Tool to cleanup redis tags from crontab.
-=======================================
+Tool to cleanup redis tags from cron
+====================================
 
 rediscli.php
 ------------
