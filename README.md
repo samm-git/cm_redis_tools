@@ -7,11 +7,11 @@ cleaning tags using Redis cache backend
 (https://github.com/colinmollenhour/Cm_Cache_Backend_Redis).  
   
 	Usage: rediscli.php <args>
-	    --server <server> - server address  
-	    --port <port> - server port  
-	    --verbose - show process status  
-	    --database <databases> - list of the databases, comma separated  
-	Example: rediscli.php --server 127.0.0.1 --port 6379 --database 0,1  
+	    -s <server> - server address  
+	    -p <port> - server port  
+	    -v - show process status  
+	    -d <databases> - list of the databases, comma separated  
+	Example: rediscli.php -s 127.0.0.1 -p 6379 -d 0,1  
 
 rediscache.php
 -------------

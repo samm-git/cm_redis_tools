@@ -23,34 +23,29 @@ include_once("Cm/Cache/Backend/Redis.php");
 
 function showHelp(){
 	echo "Usage: rediscli.php\n".
-	"\t--server <server> - server address\n".
-	"\t--port <port> - server port\n".
-	"\t--verbose - show process status\n".
-	"\t--database <databases> - list of the databases, comma separated\n".
-	"Example: rediscli.php --server 127.0.0.1 --port 6379 --database 0,1\n\n";
+	"\t-s <server> - server address\n".
+	"\t-p <port> - server port\n".
+	"\t-v show status messages\n".
+	"\t-d <database list> - list of the databases, comma separated\n".
+	"Example: rediscli.php -s 127.0.0.1 -p 6379 -d 0,1\n\n";
 	exit(0);
 }
 /* parsing command line options */
-$longopts  = array(
-	"server:",
-	"port:",   
-	"database:", 
-	"verbose"
-	);
-$options = getopt("", $longopts);
-if(!isset($options["server"]) || !isset($options["port"]) || !isset($options["database"])) {
+$opts  = "s:p:vd:";
+$options = getopt($opts);
+if(!isset($options["s"]) || !isset($options["p"]) || !isset($options["d"])) {
 	showHelp();
 } 
-$databases=preg_split('/,/',$options["database"]);
+$databases=preg_split('/,/',$options["d"]);
 
 foreach($databases as $db) {
 	$db = (int) $db;
-	if(isset($options["verbose"]))
+	if(isset($options["v"]))
 		echo "Cleaing database $db:";
 	
 
 	try {
-		$cache = new Cm_Cache_Backend_Redis(array('server' => $options["server"], 'port' => $options["port"], 'database' => $db));
+		$cache = new Cm_Cache_Backend_Redis(array('server' => $options["s"], 'port' => $options["p"], 'database' => $db));
 	} catch (CredisException $e) {
 		echo "\nError: ".$e->getMessage()."\n";
 		exit(1);
@@ -67,7 +62,7 @@ foreach($databases as $db) {
 		exit(1);
 	}
 	
-	if(isset($options["verbose"]))
+	if(isset($options["v"]))
 		echo " [done]\n";
 	unset($cache);
 }
