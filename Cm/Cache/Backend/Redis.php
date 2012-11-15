@@ -1,19 +1,38 @@
 <?php
+/*
+==New BSD License==
 
-/**
- * @see Zend_Cache_Backend
- */
-#require_once 'Zend/Cache/Backend.php';
+Copyright (c) 2012, Colin Mollenhour
+All rights reserved.
 
-/**
- * @see Zend_Cache_Backend_ExtendedInterface
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * The name of Colin Mollenhour may not be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#require_once 'Zend/Cache/Backend/ExtendedInterface.php';
 
 /**
  * Redis adapter for Zend_Cache
- * 
- * @author Colin Mollenhour
+ *
+ * @copyright  Copyright (c) 2012 Colin Mollenhour (http://colin.mollenhour.com)
+ * @license    http://framework.zend.com/license/new-bsd     New BSD License
  */
 class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Backend_ExtendedInterface
 {
@@ -31,12 +50,17 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
 
     const MAX_LIFETIME    = 2592000; /* Redis backend limit */
     const COMPRESS_PREFIX = ":\x1f\x8b";
+    const DEFAULT_CONNECT_TIMEOUT = 2.5;
+    const DEFAULT_CONNECT_RETRIES = 1;
 
     /** @var Credis_Client */
     protected $_redis;
 
     /** @var bool */
     protected $_notMatchingTags = FALSE;
+
+    /** @var int */
+    protected $_lifetimelimit = self::MAX_LIFETIME; /* Redis backend limit */
 
     /** @var int */
     protected $_compressTags = 1;
@@ -65,17 +89,16 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
             Zend_Cache::throwException('Redis \'port\' not specified.');
         }
 
-        if( isset($options['timeout'])) {
-            $this->_redis = new Credis_Client($options['server'], $options['port'], $options['timeout']);
-        } else {
-            $this->_redis = new Credis_Client($options['server'], $options['port']);
-        }
+        $timeout = isset($options['timeout']) ? $options['timeout'] : self::DEFAULT_CONNECT_TIMEOUT;
+        $persistent = isset($options['persistent']) ? $options['persistent'] : '';
+        $this->_redis = new Credis_Client($options['server'], $options['port'], $timeout, $persistent);
 
         if ( isset($options['force_standalone']) && $options['force_standalone']) {
             $this->_redis->forceStandalone();
         }
 
-        $this->_redis->setMaxConnectRetries(isset($options['connect_retries']) ? (int) $options['connect_retries'] : 1);
+        $connectRetries = isset($options['connect_retries']) ? (int)$options['connect_retries'] : self::DEFAULT_CONNECT_RETRIES;
+        $this->_redis->setMaxConnectRetries($connectRetries);
 
         if ( ! empty($options['password'])) {
             $this->_redis->auth($options['password']) or Zend_Cache::throwException('Unable to authenticate with the redis server.');
@@ -97,6 +120,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
             $this->_compressData = (int) $options['compress_data'];
         }
 
+        if ( isset($options['lifetimelimit'])) {
+            $this->_lifetimelimit = (int) min($options['lifetimelimit'], self::MAX_LIFETIME);
+        }
+        
         if ( isset($options['compress_threshold'])) {
             $this->_compressThreshold = (int) $options['compress_threshold'];
         }
@@ -188,7 +215,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
 
         // Always expire so the volatile-* eviction policies may be safely used, otherwise
         // there is a risk that tag data could be evicted.
-        $this->_redis->expire(self::PREFIX_KEY.$id, $lifetime ? $lifetime : self::MAX_LIFETIME);
+        $this->_redis->expire(self::PREFIX_KEY.$id, $lifetime ? $lifetime : $this->_lifetimelimit);
 
         // Process added tags
         if ($addTags = ($oldTags ? array_diff($tags, $oldTags) : $tags))
@@ -512,7 +539,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
      */
     public function getIdsMatchingTags($tags = array())
     {
-        return (array) $this->_redis->sInter( $this->_preprocessTagIds($tags) );
+        if ($tags) {
+            return (array) $this->_redis->sInter( $this->_preprocessTagIds($tags) );
+        }
+        return array();
     }
 
     /**
@@ -528,7 +558,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         if( ! $this->_notMatchingTags) {
             Zend_Cache::throwException("notMatchingTags is currently disabled.");
         }
-        return (array) $this->_redis->sDiff( self::SET_IDS, $this->_preprocessTagIds($tags) );
+        if ($tags) {
+            return (array) $this->_redis->sDiff( self::SET_IDS, $this->_preprocessTagIds($tags) );
+        }
+        return (array) $this->_redis->sMembers( self::SET_IDS );
     }
 
     /**
@@ -541,7 +574,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
      */
     public function getIdsMatchingAnyTags($tags = array())
     {
-        return (array) $this->_redis->sUnion( $this->_preprocessTagIds($tags));
+        if ($tags) {
+            return (array) $this->_redis->sUnion( $this->_preprocessTagIds($tags));
+        }
+        return array();
     }
 
     /**
@@ -628,6 +664,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
     /**
      * @param string $data
      * @param int $level
+     * @throws CredisException
      * @return string
      */
     protected function _encodeData($data, $level)
