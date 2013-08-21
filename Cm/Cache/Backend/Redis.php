@@ -2,7 +2,7 @@
 /*
 ==New BSD License==
 
-Copyright (c) 2012, Colin Mollenhour
+Copyright (c) 2013, Colin Mollenhour
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -15,6 +15,7 @@ modification, are permitted provided that the following conditions are met:
       documentation and/or other materials provided with the distribution.
     * The name of Colin Mollenhour may not be used to endorse or promote products
       derived from this software without specific prior written permission.
+    * The class name must remain as Cm_Cache_Backend_Redis.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -31,8 +32,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /**
  * Redis adapter for Zend_Cache
  *
- * @copyright  Copyright (c) 2012 Colin Mollenhour (http://colin.mollenhour.com)
+ * @copyright  Copyright (c) 2013 Colin Mollenhour (http://colin.mollenhour.com)
  * @license    http://framework.zend.com/license/new-bsd     New BSD License
+ * @author     Colin Mollenhour (http://colin.mollenhour.com)
  */
 class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Backend_ExtendedInterface
 {
@@ -100,13 +102,19 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         $connectRetries = isset($options['connect_retries']) ? (int)$options['connect_retries'] : self::DEFAULT_CONNECT_RETRIES;
         $this->_redis->setMaxConnectRetries($connectRetries);
 
+        if ( ! empty($options['read_timeout']) && $options['read_timeout'] > 0) {
+            $this->_redis->setReadTimeout((float) $options['read_timeout']);
+        }
+
         if ( ! empty($options['password'])) {
             $this->_redis->auth($options['password']) or Zend_Cache::throwException('Unable to authenticate with the redis server.');
         }
 
-        if ( ! empty($options['database'])) {
-            $this->_redis->select( (int) $options['database']) or Zend_Cache::throwException('The redis database could not be selected.');
+        // Always select database on startup in case persistent connection is re-used by other code
+        if (empty($options['database'])) {
+            $options['database'] = 0;
         }
+        $this->_redis->select( (int) $options['database']) or Zend_Cache::throwException('The redis database could not be selected.');
 
         if ( isset($options['notMatchingTags']) ) {
             $this->_notMatchingTags = (bool) $options['notMatchingTags'];
@@ -123,7 +131,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         if ( isset($options['lifetimelimit'])) {
             $this->_lifetimelimit = (int) min($options['lifetimelimit'], self::MAX_LIFETIME);
         }
-        
+
         if ( isset($options['compress_threshold'])) {
             $this->_compressThreshold = (int) $options['compress_threshold'];
         }
@@ -192,7 +200,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
      */
     public function save($data, $id, $tags = array(), $specificLifetime = false)
     {
-        if(!is_array($tags)) $tags = array($tags);
+        if ( ! is_array($tags)) $tags = $tags ? array($tags) : array();
 
         $lifetime = $this->getLifetime($specificLifetime);
 
@@ -213,18 +221,19 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
             throw new CredisException("Could not set cache key $id");
         }
 
-        // Always expire so the volatile-* eviction policies may be safely used, otherwise
-        // there is a risk that tag data could be evicted.
-        $this->_redis->expire(self::PREFIX_KEY.$id, $lifetime ? $lifetime : $this->_lifetimelimit);
+        // Set expiration if specified
+        if ($lifetime) {
+          $this->_redis->expire(self::PREFIX_KEY.$id, min($lifetime, self::MAX_LIFETIME));
+        }
 
         // Process added tags
-        if ($addTags = ($oldTags ? array_diff($tags, $oldTags) : $tags))
+        if ($tags)
         {
             // Update the list with all the tags
-            $this->_redis->sAdd( self::SET_TAGS, $addTags);
+            $this->_redis->sAdd( self::SET_TAGS, $tags);
 
             // Update the id list for each tag
-            foreach($addTags as $tag)
+            foreach($tags as $tag)
             {
                 $this->_redis->sAdd(self::PREFIX_TAG_IDS . $tag, $id);
             }
@@ -420,7 +429,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
      *
      * Available modes are :
      * 'all' (default)  => remove all cache entries ($tags is not used)
-     * 'old'            => unsupported
+     * 'old'            => runs _collectGarbage()
      * 'matchingTag'    => supported
      * 'notMatchingTag' => supported
      * 'matchingAnyTag' => supported
