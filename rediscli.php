@@ -27,11 +27,12 @@ function showHelp(){
 	"\t-p <port> - server port\n".
 	"\t-v show status messages\n".
 	"\t-d <database list> - list of the databases, comma separated\n".
+	"\t-a <password> - The Redis password\n".
 	"Example: rediscli.php -s 127.0.0.1 -p 6379 -d 0,1\n\n";
 	exit(0);
 }
 /* parsing command line options */
-$opts  = "s:p:vd:";
+$opts  = "s:a:p:vd:";
 $options = getopt($opts);
 if(!isset($options["s"]) || !isset($options["p"]) || !isset($options["d"])) {
 	showHelp();
@@ -41,11 +42,15 @@ $databases=preg_split('/,/',$options["d"]);
 foreach($databases as $db) {
 	$db = (int) $db;
 	if(isset($options["v"]))
-		echo "Cleaing database $db:";
+		echo "Cleaning database $db:";
 	
 
 	try {
-		$cache = new Cm_Cache_Backend_Redis(array('server' => $options["s"], 'port' => $options["p"], 'database' => $db));
+		// Check if we have a password
+		if(isset($options['a']))
+			$cache = new Cm_Cache_Backend_Redis(array('server' => $options["s"], 'port' => $options["p"], 'database' => $db, 'password' => $options["a"]));
+		else
+			$cache = new Cm_Cache_Backend_Redis(array('server' => $options["s"], 'port' => $options["p"], 'database' => $db));
 	} catch (CredisException $e) {
 		echo "\nError: ".$e->getMessage()."\n";
 		exit(1);
